@@ -14,7 +14,7 @@ This repository contains the discrete event simulation model developed to evalua
 
 ## Installation and setup
 
-This project uses [renv](https://rstudio.github.io/renv/){.uri} to manage package dependencies.
+This project uses [renv](https://rstudio.github.io/renv/) to manage package dependencies.
 
 1.  Clone the repository:
 
