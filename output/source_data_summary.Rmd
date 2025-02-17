@@ -1,0 +1,145 @@
+---
+title: "Source data analysis"
+output: html_document
+date: "2025-02-13"
+---
+
+```{r setup, include=FALSE}
+library(here)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load data, include = FALSE}
+
+EIP_waiting_times <- read.csv(here("data/processed/EIP_waiting_times.csv"))
+
+EIP_inputs <- read.csv(here("data/raw/Inputs/EIP_south_inferred.csv")) %>%
+  # Clean column names
+  rename_with(~gsub("\\.", "_", .)) %>%
+  # Create more descriptive names
+  rename(
+    budget_2018 = Budget_2018,
+    budget_2019 = Budget_2019,
+    budget_2020 = Budget_2020,
+    caseload_2018 = Caseload_2018,
+    caseload_2019 = Caseload_2019,
+    caseload_2020 = Caseload_2020,
+    ccratio_2019 = Service_Users_Per_Care_Coordinator_2019,
+    ccratio_2020 = Service_Users_Per_Care_Coordinator_2020
+  ) %>%
+  
+  pivot_longer(
+    cols = c(starts_with("budget_"), starts_with("caseload_"), starts_with("ccratio_")),
+    names_to = c("metric", "year"),
+    names_pattern = "(.*)_(\\d{4})",
+    values_to = "value"
+  ) %>%
+  # Convert year to numeric
+  mutate(year = as.numeric(year)) %>%
+  pivot_wider(
+    names_from = metric,
+    values_from = value
+  ) %>%
+  mutate(carecoords = caseload / ccratio,
+         fundingperuser = budget / caseload)
+
+write.csv(EIP_inputs, file=here("data/processed/EIP_inputs.csv"))
+
+weighted_mean_na <- function(x, w) {
+  # Remove paired NAs
+  valid <- !is.na(x) & !is.na(w)
+  x <- x[valid]
+  w <- w[valid]
+  
+  if (length(x) == 0) return(NA)
+  sum(x * w) / sum(w)
+}
+
+EIP_waiting_times_fy <- EIP_waiting_times %>%
+  # To clarify FY allocation in EIP south report
+  mutate(fy = if_else(month(Date) < 4 , year(Date), year(Date) + 1)) %>%
+  group_by(Provider_Org_code, fy) %>%
+  summarize(avg_median_wait_complete = sum(median_wait_complete * total_complete, na.rm = TRUE) / 
+              sum(total_complete[!is.na(median_wait_complete)], na.rm = TRUE),
+    avg_twoweek_complete = sum(twoweek_complete * total_complete, na.rm = TRUE) / 
+                          sum(total_complete[!is.na(twoweek_complete)], na.rm = TRUE),
+    across(c(total_complete, total_incomplete), sum, na.rm = TRUE),
+            .groups="drop")
+
+EIP_waiting_times_funding <- left_join(EIP_inputs, EIP_waiting_times_fy, by = c("Provider_code"="Provider_Org_code", "year"="fy"))
+
+```
+
+## Funding
+
+```{r funding}
+funding_caseload_model <- lm(budget ~ caseload, data = EIP_waiting_times_funding)
+ggplot(EIP_waiting_times_funding, aes(x = caseload, y = budget)) +
+  geom_point(aes(size = total_complete)) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Funding vs Caseload",
+    x = "Caseload",
+    y = "Budget (£)",
+    caption = paste("R² =", round(summary(funding_caseload_model)$r.squared, 3))
+  ) +
+  theme_minimal()
+
+funding_ccratio_model <- lm(ccratio ~ fundingperuser, data = EIP_waiting_times_funding)
+ggplot(EIP_waiting_times_funding, aes(x = fundingperuser, y = ccratio)) +
+  geom_point(aes(size = total_complete)) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Care coordinator ratio vs Funding",
+    x = "Funding per user",
+    y = "Care coordinator ratio",
+    caption = paste("R² =", round(summary(funding_ccratio_model)$r.squared, 3))
+  ) +
+  theme_minimal()
+
+funding_waiting_model <- lm(avg_twoweek_complete ~ fundingperuser, data = EIP_waiting_times_funding)
+ggplot(EIP_waiting_times_funding, aes(x = fundingperuser, y = avg_twoweek_complete)) +
+  geom_point(aes(size = total_complete)) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Waiting Time vs Funding per User",
+    x = "Funding per User (£)",
+    y = "% less than two weeks wait",
+    caption = paste("R² =", round(summary(funding_waiting_model)$r.squared, 3))
+  ) +
+  theme_minimal()
+
+ccratio_waiting_model <- lm(avg_twoweek_complete ~ ccratio, data = EIP_waiting_times_funding)
+ggplot(EIP_waiting_times_funding, aes(x = ccratio, y = avg_twoweek_complete)) +
+  geom_point(aes(size = total_complete)) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Waiting Time vs Funding per User",
+    x = "Care coordinator ratio",
+    y = "% less than two weeks wait",
+    caption = paste("R² =", round(summary(ccratio_waiting_model)$r.squared, 3))
+  ) +
+  theme_minimal()
+
+```
+
+
+## Comparison of funding and waiting times
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

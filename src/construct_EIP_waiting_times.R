@@ -66,5 +66,6 @@ EIPtimeseries_df <- read.csv("data/raw/EIP Waiting Times/EIP-Timeseries-History-
 
 # SAVE --------------------------------------------------------------------
 
-
+write.csv(EIPtimeseries_df, file = "data/processed/EIP_waiting_times.csv", row.names = FALSE)
+rm(EIPtimeseries_df)
          
