@@ -1,0 +1,162 @@
+---
+title: "Simple aggregate cost of EIP"
+author: "Ed Penington"
+date: "2025-02-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+```
+
+
+```{r load caseload, include = FALSE}
+
+ccg_df <- readRDS(here("data/processed/psymaptic_ccg_counts.Rds")) %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(age_group == "1664",
+         sex == "All",
+         ethnicity == "All") %>%
+  select(-c(age_group, sex, ethnicity, lower, upper)) %>% 
+  pivot_wider(
+    names_from = prediction_type,
+    values_from = mean
+  )
+
+```
+
+## Resources
+
+```{r determine caseload, include = TRUE}
+
+ccg_df <- ccg_df %>%
+  mutate(FEP_caseload = 
+           # Treated incidence in each year
+           treated *
+           # Multiplied by 3 (average duration 3 years)
+           3 *
+           # Assumed 80% retention rate across 3 years
+           0.8)
+
+
+ccg_df %>%
+  group_by(year) %>%
+  summarise(treated_incidence = sum(treated), 
+            total_caseload=sum(FEP_caseload)) %>%
+  ggplot() +
+  geom_line(aes(x = year, y = total_caseload, color = "Total Caseload"), 
+            linewidth = 1) +
+  geom_point(aes(x = year, y = total_caseload, color = "Total Caseload"), 
+             size = 3) +
+  geom_line(aes(x = year, y = treated_incidence, color = "Treated Incidence"), 
+            linewidth = 1) +
+  geom_point(aes(x = year, y = treated_incidence, color = "Treated Incidence"), 
+             size = 3) +
+  scale_color_manual(
+    values = c("Total Caseload" = "#2C3E50", 
+               "Treated Incidence" = "#E31A1C"),
+    name = "Measure"
+  ) +
+  scale_y_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0.05, 0.1))
+  ) +
+  scale_x_continuous(
+    breaks = function(x) seq(ceiling(min(x)), floor(max(x)), by = 1)
+  ) +
+  labs(
+    title = "FEP Treated Incidence and Total Caseload Over Time",
+    x = "Year",
+    y = "Number of Patients",
+    caption = "Data aggregated across all CCGs"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    plot.title = element_text(size = 14, face = "bold", margin = margin(b = 20)),
+    plot.caption = element_text(size = 10, color = "grey50", margin = margin(t = 20)),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 11),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey90"),
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    legend.margin = margin(t = 10)
+  )
+```
+
+### Care coordination
+
+```{r care coordination resources, include = TRUE}
+
+ccg_df <- ccg_df %>%
+  mutate(care_coordinators_wte = FEP_caseload / 15, # Maximum care coordinator ratio of 15,
+         team_leader_wte = care_coordinators_wte / 10, # Maximum 10 CC per team leader
+         coordinator_support_wte = care_coordinators_wte / 2 # Maximum 2 CC per support
+  )
+
+ccg_df %>%
+  group_by(year) %>%
+  summarise(
+    care_coordinators = sum(care_coordinators_wte),
+    team_leaders = sum(team_leader_wte),
+    coordinator_support = sum(coordinator_support_wte)
+  ) %>%
+  ggplot() +
+  geom_line(aes(x = year, y = care_coordinators, color = "Care Coordinators"), 
+            linewidth = 1) +
+  geom_point(aes(x = year, y = care_coordinators, color = "Care Coordinators"), 
+             size = 3) +
+  geom_line(aes(x = year, y = team_leaders, color = "Team Leaders"), 
+            linewidth = 1) +
+  geom_point(aes(x = year, y = team_leaders, color = "Team Leaders"), 
+             size = 3) +
+  geom_line(aes(x = year, y = coordinator_support, color = "Coordinator Support"), 
+            linewidth = 1) +
+  geom_point(aes(x = year, y = coordinator_support, color = "Coordinator Support"), 
+             size = 3) +
+  scale_color_manual(
+    values = c(
+      "Care Coordinators" = "#2C3E50",
+      "Team Leaders" = "#E31A1C",
+      "Coordinator Support" = "#33A02C"
+    ),
+    name = "Staff Role"
+  ) +
+  scale_y_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0.05, 0.1))
+  ) +
+  scale_x_continuous(
+    breaks = function(x) seq(ceiling(min(x)), floor(max(x)), by = 1)
+  ) +
+  labs(
+    title = "Required EIP Workforce Over Time",
+    subtitle = "Based on caseload ratios: 15:1 for care coordinators, 10:1 for team leaders, 2:1 for support staff",
+    x = "Year",
+    y = "Required Full-Time Equivalent (FTE) Staff",
+    caption = "Data aggregated across all CCGs"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    plot.title = element_text(size = 14, face = "bold", margin = margin(b = 10)),
+    plot.subtitle = element_text(size = 11, color = "grey40", margin = margin(b = 20)),
+    plot.caption = element_text(size = 10, color = "grey50", margin = margin(t = 20)),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 11),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey90"),
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    legend.margin = margin(t = 10)
+  )
+```
